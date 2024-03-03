@@ -31,7 +31,6 @@ const SITES = [
   //   url: "http://toznnag5o3ambca56s2yacteu7q7x2avrfherzmz4nmujrjuib4iusad.onion",
   // },
 ]
-
 const RANGE_EXPR = /\${range:(\d+-\d+)}/
 
 async function scrapeSite(site: (typeof SITES)[0]) {
@@ -65,7 +64,7 @@ async function scrapeSite(site: (typeof SITES)[0]) {
         maxAge: CACHE_SECONDS,
       })(url)
       const dom = new jsdom.JSDOM(body)
-      console.log(Tag, `fetched ${dom.window.document.title}`)
+      // console.log(Tag, `fetched ${dom.window.document.title}`)
 
       const posts = pry(() => parser.getPosts(dom))
       if (!posts.ok) {
@@ -146,6 +145,8 @@ async function scrapeSite(site: (typeof SITES)[0]) {
     }
   }
 
+  console.log(`Storing ${postDetails.length} post details for ${site.type} at ${siteUrl.hostname}`);
+  
   await storage.setItemRaw(`parsed/${site.type}/${siteUrl.hostname}/posts.json`, JSON.stringify(postDetails, null, 2))
 }
 
