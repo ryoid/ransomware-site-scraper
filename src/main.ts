@@ -34,6 +34,8 @@ const SITES = [
 async function main() {
   console.log("Hello World")
   for (const site of SITES) {
+    const Tag = `[${site.type}]`
+
     const body = await cache(getPage, {
       key: site.url,
       maxAge: CACHE_SECONDS,
@@ -41,14 +43,20 @@ async function main() {
     // removed all /n /r/n
     // const bodyCleaned = body.replace(/(\r\n|\n|\r)/gm, "")
     const dom = new jsdom.JSDOM(body)
-    console.log(dom.window.document.title)
+    console.log(Tag, `fetched ${dom.window.document.title}`)
 
     if (!isSupportedType(site.type)) {
       throw new Error(`Unsupported type: ${site.type}`)
     }
     const parser = Parsers[site.type]
-    const posts = parser.getPosts(dom)
-    for (const post of posts) {
+    const posts = pry(() => parser.getPosts(dom))
+    if (!posts.ok) {
+      console.error(Tag, "Failed to parse posts", { url: site.url })
+      throw posts.err
+    }
+    console.log(Tag, "found posts:", posts.val.length)
+
+    for (const post of posts.val) {
       // Check if link is relative
       if (!/^(http|https):\/\//.test(post.link)) {
         post.link = `${site.url}${post.link}`
@@ -60,13 +68,13 @@ async function main() {
       const dom = new jsdom.JSDOM(body)
       const details = pry(() => parser.getPostDetails(dom))
       if (!details.ok) {
-        console.error("Failed to parse post details", { link: post.link })
+        console.error(Tag, "Failed to parse post details", { link: post.link })
         throw details.err
       }
+      console.log(Tag, "details", details.val)
     }
-
-    console.log("parsed:", posts)
   }
+  // <td class="link"><a href="archive/" title="archive"><img class="icons" src="/icons/folder.png"><span class="folder-name">archive</span></a> </td>
 }
 
 main()
