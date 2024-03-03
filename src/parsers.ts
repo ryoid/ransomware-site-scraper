@@ -5,24 +5,60 @@ function cleanText(text: string) {
   return text.replace(/(\r\n|\n|\r)/gm, "").trim()
 }
 
-export const Parsers = {
-  lockbit: (dom: jsdom.JSDOM) => {
+export type Post = {
+  link: string
+}
+
+export type PostDetails = {
+  title: string
+  content: string
+  uploadedDate: Date
+  updatedDate: Date
+  fileLinks: string[]
+}
+
+interface Parser {
+  getPosts(dom: jsdom.JSDOM): { link: string }[]
+  getPostDetails(dom: jsdom.JSDOM): PostDetails
+}
+
+export class LockbitParser implements Parser {
+  getPosts(dom: jsdom.JSDOM) {
     const posts = dom.window.document.querySelectorAll(".post-block")
 
-    const results: { title: string; body: string; published: boolean; link?: string }[] = []
+    const results: { link: string }[] = []
     for (const post of posts) {
-      const link = post.getAttribute("href") ?? undefined
-      const title = cleanText(post.querySelector(".post-title")?.textContent ?? "")
-      const body = cleanText(post.querySelector(".post-block-body > .post-block-text")?.textContent ?? "")
-      if (title === "") {
+      // Relative
+      const link = post.getAttribute("href") ?? ""
+      if (link === "") {
         continue
       }
-      const published = !!post.classList.contains("good") // .bad for unpublished
-      results.push({ title, body, published, link })
+      results.push({ link })
     }
 
     return results
-  },
+  }
+  getPostDetails(dom: jsdom.JSDOM) {
+    const title = cleanText(dom.window.document.querySelector(".post-big-title")?.textContent ?? "")
+    const content = cleanText(dom.window.document.querySelector(".desc")?.textContent ?? "")
+    const uploadedDateStr = cleanText(dom.window.document.querySelector(".uploaded-date-utc")?.textContent ?? "")
+    const updatedDateStr = cleanText(dom.window.document.querySelector(".updated-date-utc")?.textContent ?? "")
+    const fileLinks = Array.from(dom.window.document.querySelectorAll(".reserve-links > a").values())
+      // Full
+      .map((el) => cleanText(el.getAttribute("href") ?? ""))
+      .filter((link) => link !== "")
+
+    if (!title || !content || !uploadedDateStr || !updatedDateStr) {
+      throw new Error(`Failed to parse post details`)
+    }
+    const uploadedDate = new Date(uploadedDateStr)
+    const updatedDate = new Date(updatedDateStr)
+    return { title, content, uploadedDate, updatedDate, fileLinks }
+  }
+}
+
+export const Parsers: Record<string, Parser> = {
+  lockbit: new LockbitParser(),
 } as const
 export type ParserType = keyof typeof Parsers
 

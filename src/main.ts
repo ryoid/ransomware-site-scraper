@@ -1,29 +1,9 @@
 import jsdom from "jsdom"
-import { ProxyAgent, RequestInit, fetch } from "undici"
-
-import { createCache } from "cachecan"
-import { createStorage } from "unstorage"
-import fsDriver from "unstorage/drivers/fs"
+import { pry } from "pry-ts"
+import { cache, getPage } from "./crawler"
 import { Parsers, isSupportedType } from "./parsers"
 
-const storage = createStorage({
-  driver: fsDriver({ base: "./tmp" }),
-})
-
-const [cache] = createCache({
-  storage,
-  defaults: {},
-})
-
-const torProxy = new ProxyAgent("http://127.0.0.1:8118")
-
-async function getPage(url: string, options: RequestInit = {}) {
-  const response = await fetch(url, { dispatcher: torProxy, ...options })
-  if (!response.ok) {
-    throw new Error(`Error fetching ${url}: ${response.status} ${response.statusText}`)
-  }
-  return response.text()
-}
+const CACHE_SECONDS = 60 * 60 * 24 * 7 // 7 days
 
 /**
  * Sites to scrape
@@ -56,7 +36,7 @@ async function main() {
   for (const site of SITES) {
     const body = await cache(getPage, {
       key: site.url,
-      maxAge: 60 * 3,
+      maxAge: CACHE_SECONDS,
     })(site.url)
     // removed all /n /r/n
     // const bodyCleaned = body.replace(/(\r\n|\n|\r)/gm, "")
@@ -66,8 +46,26 @@ async function main() {
     if (!isSupportedType(site.type)) {
       throw new Error(`Unsupported type: ${site.type}`)
     }
-    const result = Parsers[site.type](dom)
-    console.log("parsed:", result)
+    const parser = Parsers[site.type]
+    const posts = parser.getPosts(dom)
+    for (const post of posts) {
+      // Check if link is relative
+      if (!/^(http|https):\/\//.test(post.link)) {
+        post.link = `${site.url}${post.link}`
+      }
+      const body = await cache(getPage, {
+        key: post.link,
+        maxAge: CACHE_SECONDS,
+      })(post.link)
+      const dom = new jsdom.JSDOM(body)
+      const details = pry(() => parser.getPostDetails(dom))
+      if (!details.ok) {
+        console.error("Failed to parse post details", { link: post.link })
+        throw details.err
+      }
+    }
+
+    console.log("parsed:", posts)
   }
 }
 
