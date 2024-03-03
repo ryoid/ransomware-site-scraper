@@ -1,9 +1,24 @@
 import { JSDOM } from "jsdom"
-import type { Parser, PostDetails } from "./parser"
+import type { FileLink, Parser, PostDetails } from "./parser"
 import { cleanText } from "./utils"
 
 function filterEmptyNodes(nodes: NodeListOf<ChildNode>) {
   return Array.from(nodes).filter((node) => node.textContent && node.textContent.trim() !== "")
+}
+
+function createDate(str: string) {
+  // validate
+  // Sometimes one digit, sometimes year is 2 or 4 digit
+  if (!/^\d{1,2}\.\d{1,2}\.(?:\d{2}|\d{4})$/.test(str)) {
+    throw new Error(`Invalid date format: ${str}`)
+  }
+
+  let [month, day, year] = str.split(".")
+  if (year.length === 2) {
+    year = "20" + year
+  }
+
+  return new Date(+year, +month - 1, +day)
 }
 
 export class EightBaseParser implements Parser {
@@ -39,105 +54,99 @@ export class EightBaseParser implements Parser {
   }
 
   getPostDetailsFromContainer(container: HTMLDivElement) {
-    const nonEmptyNodes = filterEmptyNodes(container.childNodes)
-
-    // for (const node of nonEmptyNodes) {
-    //   console.log("node", node.textContent)
-    // }
-    if (nonEmptyNodes.length < 5) {
-      console.error(`Failed to parse post details`, container.childNodes.length, dom.window.document.body.innerHTML)
-      throw new Error(`Failed to parse post details`)
-    }
-
-    if (nonEmptyNodes[0].textContent === "NEW" || nonEmptyNodes[0].textContent === "Published") {
-      nonEmptyNodes.shift()
-    }
-
-    if (!filterEmptyNodes(nonEmptyNodes[1].childNodes)[0].textContent?.includes("Downloaded: ")) {
-      // nonEmptyNodes[1] Still at title
-      nonEmptyNodes.shift()
-    }
-
-    const title = cleanText(nonEmptyNodes[0]?.textContent ?? "")
-
-    const createdDateStr = cleanText(
-      (filterEmptyNodes(nonEmptyNodes[1].childNodes)[0] as HTMLElement)?.querySelector("b")?.textContent ?? ""
+    const title = container.querySelector(":scope > a.stretched-link")?.textContent?.trim() ?? ""
+    const createdDate = createDate(
+      container.querySelector(":scope > a.stretched-link ~ div > div:nth-child(1) > b")?.textContent?.trim() ?? ""
+    )
+    const publishedDate = createDate(
+      container.querySelector(":scope > a.stretched-link ~ div > div:nth-child(2) > b")?.textContent?.trim() ?? ""
     )
 
-    const publishedDateStr = cleanText(
-      (filterEmptyNodes(nonEmptyNodes[1].childNodes)[1] as HTMLElement)?.querySelector("b")?.textContent ?? ""
-    )
-
-    let content = cleanText(filterEmptyNodes(nonEmptyNodes[2].childNodes)[0].textContent?.trim() ?? "")
-
+    /** Content and website */
+    const contentContainer = container.querySelector(":scope > a.stretched-link ~ div ~ div") as HTMLDivElement
+    const contentParagraphs = filterEmptyNodes(contentContainer.querySelectorAll("p"))
     let website: string | undefined
+    // <p>Bla bla bla<br>google.com</p>
+    const m = /<br>(.+)<\/p>/.exec(contentContainer.innerHTML)
+    if (m?.[1]) {
+      website = m[1]
+    } else if (contentParagraphs.length > 1) {
+      website = contentParagraphs.pop()?.textContent?.trim()
+    }
+    let content = contentContainer.textContent ?? ""
+    if (website) {
+      content = content.replace(website, "").trim()
+    }
+    content = cleanText(content)
 
-    const match = (nonEmptyNodes[2] as HTMLDivElement).innerHTML.match(/<br>(.+)<\/p>/)
-    if (match?.[1]) {
-      website = match[1]
-    } else {
-      const websiteTemp = filterEmptyNodes(nonEmptyNodes[2].childNodes)
-      if (websiteTemp.length > 1) {
-        website = cleanText(websiteTemp.pop()?.textContent ?? "")
+    // Fallback extract any website from content (sometimes near the end)
+    // http:// or https:// followed by space or end of content
+    if (!website) {
+      const m = content.match(/(https?:\/\/\S+)(?:\s|$)/)
+      if (m?.[1]) {
+        website = m[1]
       }
     }
-    if (website) {
-      // remove all <br>
-      website = website.replace(/<br>/g, "")
-    }
 
-    const commentEl = nonEmptyNodes[4] as HTMLElement
-    if (!commentEl) {
-      throw new Error(`Failed to find comment element`)
-    }
-    let filesDescription: string[] = []
-    let fileLinks: string[] = []
-    const commentPtags = commentEl.querySelectorAll("p")
-    if (commentPtags) {
-      fileLinks = [cleanText(commentPtags[commentPtags.length - 1]?.textContent?.trim() ?? "")]
-      let desc = commentPtags[0]?.textContent ?? ""
-      // replace
-      desc = desc.replace("Were uploaded to the servers:", "")
-      desc = desc.replace("A small part of the files:", "")
-
-      desc = desc.replace("\n", ", ").trim()
-      filesDescription.push(desc)
-    } else {
-      // impossible to parse from structure, maybe regex
-      commentEl.childNodes.forEach((el) => {
-        if (!el?.textContent || el.textContent.trim() === "") {
-          return
+    const fileContainer = container.querySelector(":scope > a.stretched-link ~ div ~ div ~ div") as HTMLDivElement
+    const fileAnchor = fileContainer.querySelector(":scope > a") as HTMLAnchorElement
+    const fileParagraphs = filterEmptyNodes(fileContainer.querySelectorAll("p"))
+    const fileLinks: FileLink[] = []
+    const filesDescription: string[] = []
+    if (fileParagraphs.length === 2) {
+      const text = fileParagraphs[1].textContent
+      if (text) {
+        // split by https:// or http:// to handle multiple links
+        const urls = text.split(/(?=https?:\/\/)/)
+        for (const url of urls) {
+          fileLinks.push({
+            url: url.trim(),
+          })
         }
-
-        const text = el.textContent.trim()
-        if (text.startsWith("https://mega.nz") || text.startsWith("https://anonfiles.com")) {
-          fileLinks.push(text)
-          return
-        }
-
-        // Skip comment
-        // e.g. "were uploaded to the servers:"
-        if (text.endsWith(":")) {
-          return
-        }
-        filesDescription.push(text)
+      }
+    } else if (fileAnchor && fileContainer.childNodes.length === 3) {
+      // Single anchor link
+      // NodeList(3) [text, a, text]
+      fileLinks.push({
+        url: fileAnchor.href,
       })
+    } else {
+      // handle text node based
+      const nodes = Array.from(fileContainer.childNodes)
+        // text nodes
+        .filter((n) => n.nodeType === 3)
+        .map((n) => n.textContent?.trim())
+        .filter((t): t is string => !!t)
+
+      for (const text of nodes) {
+        // node is a file (link)
+        // http:// or https://
+        if (/(https?:\/\/)/.test(text)) {
+          fileLinks.push({
+            url: text,
+          })
+          continue
+        }
+
+        // Is a useless comment
+        // The data contains:
+        // ends with \w:
+        // letter then colon
+        if (/\w:$/.test(text)) {
+          continue
+        }
+
+        filesDescription.push(text)
+      }
     }
 
-    if (!title || !content || !createdDateStr || !publishedDateStr) {
-      throw new Error(`Failed to parse post details`)
-    }
-    const createdDate = new Date(createdDateStr)
-    const publishedDate = new Date(publishedDateStr)
     return {
       title,
       content,
       createdDate,
       publishedDate,
-      fileLinks: fileLinks.map((url) => ({
-        url,
-      })),
-      filesDescription: filesDescription.join(", "),
+      fileLinks,
+      filesDescription: filesDescription.length > 0 ? filesDescription.join(", ") : undefined,
 
       website,
     } satisfies PostDetails

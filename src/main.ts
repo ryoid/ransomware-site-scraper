@@ -79,13 +79,13 @@ async function scrapeSite(site: (typeof SITES)[0]) {
       } else {
         allPosts.push(...posts.val.details.map((d) => ({ link: d.link })))
         postDetails.push(
-          ...posts.val.details.map((d) => {
+          ...posts.val.details.map(({ link, ...rest }) => {
             // Check if link is relative
-            let url = d.link
-            if (!/^(http|https):\/\//.test(d.link)) {
-              url = `${siteUrl.origin}${d.link}`
+            let url = link
+            if (!/^(http|https):\/\//.test(link)) {
+              url = `${siteUrl.origin}${link}`
             }
-            return { ...d, url }
+            return { ...rest, url }
           })
         )
         crawlPostDetails = false
@@ -111,13 +111,13 @@ async function scrapeSite(site: (typeof SITES)[0]) {
     } else {
       allPosts.push(...posts.val.details.map((d) => ({ link: d.link })))
       postDetails.push(
-        ...posts.val.details.map((d) => {
+        ...posts.val.details.map(({ link, ...rest }) => {
           // Check if link is relative
-          let url = d.link
-          if (!/^(http|https):\/\//.test(d.link)) {
-            url = `${siteUrl.origin}${d.link}`
+          let url = link
+          if (!/^(http|https):\/\//.test(link)) {
+            url = `${siteUrl.origin}${link}`
           }
-          return { ...d, url }
+          return { ...rest, url }
         })
       )
       crawlPostDetails = false
