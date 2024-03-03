@@ -4,7 +4,7 @@ import { createCache } from "cachecan"
 import { createStorage } from "unstorage"
 import fsDriver from "unstorage/drivers/fs"
 
-const storage = createStorage({
+export const storage = createStorage({
   driver: fsDriver({ base: "./tmp" }),
 })
 
