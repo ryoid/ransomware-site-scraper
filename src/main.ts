@@ -16,7 +16,7 @@ const SITES = [
   },
   {
     type: "play",
-    url: "http://mbrlkbtq5jonaqkurjwmxftytyn2ethqvbxfu4rgjbkkknndqwae6byd.onion/index.php?page=${range:4-22}", // 2023 range
+    url: "http://mbrlkbtq5jonaqkurjwmxftytyn2ethqvbxfu4rgjbkkknndqwae6byd.onion/index.php?page=${range:1-22}", // 2023 range
   },
   {
     type: "8base",
@@ -54,13 +54,8 @@ async function scrapeSite(site: (typeof SITES)[0]) {
     for (let i = start; i <= end; i++) {
       const url = site.url.replace(RANGE_EXPR, i.toString())
       const body = await cache(getPage, {
-        key: [
-          "pages",
-          site.type,
-          siteUrl.hostname,
-          encodeURIComponent(siteUrl.pathname + siteUrl.search),
-          i.toString() + ".html",
-        ],
+        // exclude search coz of page
+        key: ["pages", site.type, siteUrl.hostname, encodeURIComponent(siteUrl.pathname), i.toString() + ".html"],
         maxAge: CACHE_SECONDS,
       })(url)
       const dom = new jsdom.JSDOM(body)
@@ -124,6 +119,8 @@ async function scrapeSite(site: (typeof SITES)[0]) {
   }
 
   if (crawlPostDetails) {
+    console.log("Crawling post details for", site.type, "at", siteUrl.hostname, "with", allPosts.length, "posts")
+
     for (const post of allPosts) {
       // Check if link is relative
       let postUrl = post.link
@@ -145,8 +142,8 @@ async function scrapeSite(site: (typeof SITES)[0]) {
     }
   }
 
-  console.log(`Storing ${postDetails.length} post details for ${site.type} at ${siteUrl.hostname}`);
-  
+  console.log(`Storing ${postDetails.length} post details for ${site.type} at ${siteUrl.hostname}`)
+
   await storage.setItemRaw(`parsed/${site.type}/${siteUrl.hostname}/posts.json`, JSON.stringify(postDetails, null, 2))
 }
 
